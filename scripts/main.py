@@ -1,7 +1,6 @@
 import pandas as pd
 import os
 
-
 def extract_chemistry_data(input_file, output_file):
     if not os.path.exists(input_file):
         print(f"Error: Could not find the file at {input_file}")
@@ -19,8 +18,9 @@ def extract_chemistry_data(input_file, output_file):
         if pd.isna(df.iloc[1, col_idx]) or "MeCN" in amine_name or amine_name == "nan":
             continue
 
-        # Amine level metadata
+        # Amine level metadata (Now including Experiment Block from row 0)
         amine_meta = {
+            "Experiment_Block": df.iloc[0, col_idx], # Added extraction from the very first row
             "Amine_Name": amine_name,
             "Amine_MW_g_mol": df.iloc[3, col_idx],
             "Actual_Mass_Amine_g": df.iloc[7, col_idx],
@@ -32,6 +32,10 @@ def extract_chemistry_data(input_file, output_file):
         # Each aldehyde block is 15 rows high, 20 blocks total, starting at row 13
         for i in range(20):
             row = 13 + (i * 15)
+            # Ensure we don't go out of bounds if the sheet is shorter than expected
+            if row >= len(df):
+                break
+                
             aldehyde_name = df.iloc[row, col_idx]
 
             if pd.isna(aldehyde_name):
@@ -55,10 +59,12 @@ def extract_chemistry_data(input_file, output_file):
             extracted_data.append(reaction)
 
     # Save to CSV
-    final_df = pd.DataFrame(extracted_data)
-    final_df.to_csv(output_file, index=False)
-    print(f"Done! Extracted {len(final_df)} reactions to {output_file}")
-
+    if extracted_data:
+        final_df = pd.DataFrame(extracted_data)
+        final_df.to_csv(output_file, index=False)
+        print(f"Done! Extracted {len(final_df)} reactions to {output_file}")
+    else:
+        print("No data was extracted. Please check the sheet structure.")
 
 # Execution
 if __name__ == "__main__":
