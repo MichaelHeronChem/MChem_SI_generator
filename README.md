@@ -7,4 +7,4 @@ Usage:
 2. UV Sync
 3. Put reaction_planner_tracker.xlsx in data/raw
 4. uv run python scripts/main.py
-5. extracted data output to data/output as a csv
+5. extracted data is sent to data/output as a csv
