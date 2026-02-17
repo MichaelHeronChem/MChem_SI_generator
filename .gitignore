@@ -8,5 +8,4 @@ wheels/
 
 # Virtual environments
 .venv
-data/output/extracted_reaction_data.csv
-data/raw/reaction_planner_tracker.xlsx
+data/
