@@ -1,108 +1,167 @@
 import pandas as pd
 from docx import Document
 from docx.shared import Pt, Inches
+from fpdf import FPDF
 import os
 import math
 
 def format_sig_figs(val, n):
-    if pd.isna(val) or val == 0:
-        return "0"
+    if pd.isna(val) or val == 0: return "0"
     decimals = n - 1 - int(math.floor(math.log10(abs(val))))
-    if decimals <= 0:
-        return format(round(val, decimals), '.0f')
-    return format(val, f'.{decimals}f')
+    return format(val, f'.{decimals}f') if decimals > 0 else format(round(val, decimals), '.0f')
 
-def generate_final_si(csv_input, nmr_image_folder, output_docx):
-    if not os.path.exists(csv_input):
-        print(f"Error: Could not find {csv_input}")
-        return
+class SI_PDF(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 10)
+        self.cell(0, 10, 'Supporting Information', 0, 1, 'R')
 
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Arial', 'I', 8)
+        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+
+def generate_si_files(csv_input, nmr_image_folder, output_base):
     df = pd.read_csv(csv_input)
     doc = Document()
-    
-    # Global Style: Minimize spacing
-    style = doc.styles['Normal']
-    style.paragraph_format.space_after = Pt(2) # Minimal gap between text and image
+    pdf = SI_PDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
 
+    # --- 1. GLOBAL EXPERIMENTAL METHODS (At the very top) ---
+    doc.add_heading('General Experimental Procedures', level=1)
+    pdf.set_font('Arial', 'B', 16)
+    pdf.cell(0, 10, 'General Experimental Procedures', 0, 1)
+    pdf.ln(2)
+
+    methods = [
+        ("Amine Stock Solutions", "Amine stock solutions were made as follows: Amine and HMDSO was added to 10 mL volumetric flask and filled up to the mark with 15% MeCN-d3 in MeCN dried over molecular sieves to give 10 mL of amine stock solution."),
+        ("Aldehyde Stock Solutions", "Aldehyde stock solutions were made as follows: Aldehyde was added to a sample vial. Enough MeCN was dispensed into the sample vial by the Hamilton liquid handler using 1000 uL disposable tips to create a 100.00 mM aldehyde solution."),
+        ("Reaction Method", "Reactions were made up using Hamilton liquid handler with 300 uL disposable tips. Teflon coated stirrer bars were added to the vials, which were then sealed and left to stir overnight before NMR analysis.")
+    ]
+
+    for title, text in methods:
+        # Word
+        p = doc.add_paragraph()
+        p.add_run(f"{title}: ").bold = True
+        p.add_run(text)
+        # PDF
+        pdf.set_font('Arial', 'B', 11)
+        pdf.cell(0, 8, title, 0, 1)
+        pdf.set_font('Arial', '', 10)
+        pdf.multi_cell(0, 5, text)
+        pdf.ln(4)
+
+    # --- 2. BLOCK-SPECIFIC DATA ---
     blocks = df.groupby('Experiment_Block')
 
     for block_id, block_data in blocks:
-        # --- 1. BLOCK HEADER (14pt) ---
-        unique_amines = block_data['Amine_Name'].unique()
-        amines_str = ", ".join(map(str, unique_amines))
-        h1 = doc.add_paragraph()
-        run1 = h1.add_run(f"Imine formation reactions block {block_id}: Amines {amines_str} with 20 aldehydes")
-        run1.bold = True
-        run1.font.size = Pt(14)
-
-        # --- 2. RESTORED: STOCK SOLUTION RECIPES (12pt, Bold, Underline) ---
-        h2 = doc.add_paragraph()
-        run2 = h2.add_run("Stock Solution Recipes")
-        run2.bold = True
-        run2.underline = True
-        run2.font.size = Pt(12)
-
-        # Amine Stocks
-        amines = block_data.drop_duplicates(subset=['Amine_Name'])
-        for _, row in amines.iterrows():
-            amine_mass = row['Actual_Mass_Amine_g'] 
-            amine_mmol = amine_mass / row['Amine_MW_g_mol']
-            hmdso_mmol = row['Actual_Mass_HMDSO_mg'] / 162.38
-            amine_conc = format_sig_figs(row['Actual_Amine_Conc_mM'], 3)
-            hmdso_conc = format_sig_figs(row['Actual_Conc_HMDSO_mM'], 3)
-            
-            p = doc.add_paragraph()
-            p.add_run(f"{row['Amine_Name']} stock solution: ").bold = True
-            p.add_run(f"{row['Amine_Name']} ({amine_mass:.2f} mg, {amine_mmol:.3f} mmol) and hexamethyldisiloxane ({row['Actual_Mass_HMDSO_mg']:.2f} mg, {hmdso_mmol:.3f} mmol) was added to a 10 mL volumetric flask and filled up to the mark with 15% MeCN-d3 in MeCN dried over molecular sieves to give 10 mL of {amine_conc} mM {row['Amine_Name']} and {hmdso_conc} mM hexamethyldisiloxane stock solution.")
-
-        # Aldehyde Stocks
-        aldehydes = block_data.drop_duplicates(subset=['Aldehyde_Name'])
-        for _, row in aldehydes.iterrows():
-            ald_mmol = row['Aldehyde_Actual_Mass_mg'] / row['Aldehyde_MW_g_mol']
-            ald_conc = format_sig_figs(row['Actual_Aldehyde_Conc_mM'], 4)
-            
-            p = doc.add_paragraph()
-            p.add_run(f"{row['Aldehyde_Name']} stock solution: ").bold = True
-            p.add_run(f"{row['Aldehyde_Name']} ({row['Aldehyde_Actual_Mass_mg']:.2f} mg, {ald_mmol:.3f} mmol) was added to a sample vial, {row['Aldehyde_Vol_Required_uL']:.1f} µL was dispensed into the sample vial by the Hamilton liquid handler using 1000 µL disposable tips to create a {ald_conc} mM {row['Aldehyde_Name']} stock solution.")
-
-        # --- 3. REACTION PROCEDURES & FIGURES ---
-        doc.add_paragraph().add_run("\nIndividual Reaction Procedures and 1H NMR Spectra").bold = True
+        doc.add_page_break()
+        pdf.add_page()
         
-        amine_groups = block_data.groupby('Amine_Name', sort=False)
-        for amine_name, amine_group in amine_groups:
-            doc.add_heading(f"Reactions with {amine_name}", level=2)
+        block_title = f"Imine formation reactions block {block_id}"
+        doc.add_heading(block_title, level=1)
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 10, block_title, 0, 1)
+        pdf.ln(5)
 
-            for _, row in amine_group.iterrows():
-                # Text First
-                amine_conc = format_sig_figs(row['Actual_Amine_Conc_mM'], 3)
-                ald_conc = format_sig_figs(row['Actual_Aldehyde_Conc_mM'], 4)
-                
-                p = doc.add_paragraph()
-                p.add_run("To a sample vial was added, ").bold = False
-                p.add_run(f"{row['Vol_Amine_Sol_uL']:.1f} µL ").bold = True
-                p.add_run(f"of {amine_conc} mM {amine_name} solution and ")
-                p.add_run(f"{row['Vol_Aldehyde_Sol_uL']:.1f} µL ").bold = True
-                p.add_run(f"of {ald_conc} mM {row['Aldehyde_Name']} solution using the Hamilton liquid handler with 300 µL disposable tips. Teflon coated stirrer bars was added to the vial and the vial sealed and the mixture left to stir overnight. The reaction mixture was then transferred to an NMR tube and 1H NMR was taken with acetonitrile solvent suppression.")
+        # --- AMINE TABLE ---
+        doc.add_heading(f"Amine Stocks - Block {block_id}", level=2)
+        pdf.set_font('Arial', 'B', 11)
+        pdf.cell(0, 8, "Amine Stock Details", 0, 1)
+        
+        amines = block_data.drop_duplicates(subset=['Amine_Name'])
+        headers = ['Amine Name', 'Mass (mg)', 'Amount (mmol)', 'Conc (mM)', 'HMDSO (mmol)']
+        # PDF Column Widths: Name is much wider to prevent spill
+        a_widths = [65, 30, 30, 30, 35] 
+        
+        t1 = doc.add_table(rows=1, cols=5)
+        t1.style = 'Table Grid'
+        for i, h in enumerate(headers): t1.rows[0].cells[i].text = h
 
-                # Image Second
-                img_filename = f"{amine_name.replace(' ', '_')}_{row['Aldehyde_Name'].replace(' ', '_')}.png"
-                img_path = os.path.join(nmr_image_folder, img_filename)
+        for _, row in amines.iterrows():
+            m_mg = row['Actual_Mass_Amine_g'] * 1000
+            vals = [str(row['Amine_Name']), f"{m_mg:.2f}", f"{m_mg/row['Amine_MW_g_mol']:.3f}", 
+                    format_sig_figs(row['Actual_Amine_Conc_mM'], 3), f"{row['Actual_Mass_HMDSO_mg']/162.38:.3f}"]
+            
+            cells = t1.add_row().cells
+            pdf.set_font('Arial', '', 9)
+            for i, v in enumerate(vals):
+                cells[i].text = v
+                pdf.cell(a_widths[i], 7, v, 1)
+            pdf.ln()
 
-                # Caption/Title for Figure
-                cap = doc.add_paragraph()
-                cap.paragraph_format.space_before = Pt(6)
-                cap.add_run(f"Figure: 1H NMR of {amine_name} and {row['Aldehyde_Name']}").bold = True
+        # --- ALDEHYDE TABLE ---
+        doc.add_heading(f"Aldehyde Stocks - Block {block_id}", level=2)
+        pdf.ln(10)
+        pdf.set_font('Arial', 'B', 11)
+        pdf.cell(0, 8, "Aldehyde Stock Details", 0, 1)
 
-                if os.path.exists(img_path):
-                    doc.add_picture(img_path, width=Inches(5.5)) # Reduced width slightly to help with whitespace/page fit
-                else:
-                    doc.add_paragraph(f"[MISSING NMR: {img_filename}]").style = 'Intense Quote'
+        aldehydes = block_data.drop_duplicates(subset=['Aldehyde_Name'])
+        headers = ['Aldehyde Name', 'Mass (mg)', 'Amount (mmol)', 'Vol (uL)', 'Conc (mM)']
+        
+        t2 = doc.add_table(rows=1, cols=5)
+        t2.style = 'Table Grid'
+        for i, h in enumerate(headers): t2.rows[0].cells[i].text = h
 
-                doc.add_page_break()
+        for _, row in aldehydes.iterrows():
+            m_mg = row['Aldehyde_Actual_Mass_mg']
+            vals = [str(row['Aldehyde_Name']), f"{m_mg:.2f}", f"{m_mg/row['Aldehyde_MW_g_mol']:.3f}", 
+                    f"{row['Aldehyde_Vol_Required_uL']:.1f}", format_sig_figs(row['Actual_Aldehyde_Conc_mM'], 4)]
+            
+            cells = t2.add_row().cells
+            pdf.set_font('Arial', '', 9)
+            for i, v in enumerate(vals):
+                cells[i].text = v
+                pdf.cell(a_widths[i], 7, v, 1)
+            pdf.ln()
 
-    doc.save(output_docx)
-    print(f"Final SI generated successfully: {output_docx}")
+        # --- REACTION TABLE ---
+        doc.add_heading(f"Reaction Volumes - Block {block_id}", level=2)
+        pdf.ln(10)
+        pdf.set_font('Arial', 'B', 11)
+        pdf.cell(0, 8, "Reaction Volumes", 0, 1)
+
+        headers = ['Amine', 'Aldehyde', 'Vol Amine (uL)', 'Vol Ald (uL)']
+        r_widths = [50, 50, 45, 45]
+        
+        t3 = doc.add_table(rows=1, cols=4)
+        t3.style = 'Table Grid'
+        for i, h in enumerate(headers): t3.rows[0].cells[i].text = h
+
+        for _, row in block_data.iterrows():
+            vals = [str(row['Amine_Name']), str(row['Aldehyde_Name']), f"{row['Vol_Amine_Sol_uL']:.1f}", f"{row['Vol_Aldehyde_Sol_uL']:.1f}"]
+            cells = t3.add_row().cells
+            pdf.set_font('Arial', '', 8) # Smaller font for the big reaction table
+            for i, v in enumerate(vals):
+                cells[i].text = v
+                pdf.cell(r_widths[i], 6, v, 1)
+            pdf.ln()
+
+    # --- 3. NMR APPENDIX ---
+    doc.add_page_break()
+    pdf.add_page()
+    doc.add_heading('Appendix: 1H NMR Spectra', level=1)
+    pdf.set_font('Arial', 'B', 16)
+    pdf.cell(0, 10, "Appendix: 1H NMR Spectra", 0, 1)
+
+    for _, row in df.iterrows():
+        title = f"1H NMR: {row['Amine_Name']} + {row['Aldehyde_Name']}"
+        img_name = f"{str(row['Amine_Name']).replace(' ', '_')}_{str(row['Aldehyde_Name']).replace(' ', '_')}.png"
+        img_path = os.path.join(nmr_image_folder, img_name)
+        
+        doc.add_paragraph(title).bold = True
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(0, 8, title, 0, 1)
+
+        if os.path.exists(img_path):
+            doc.add_picture(img_path, width=Inches(6.0))
+            if pdf.get_y() > 180: pdf.add_page()
+            pdf.image(img_path, w=180)
+            pdf.ln(5)
+
+    doc.save(f"{output_base}.docx")
+    pdf.output(f"{output_base}.pdf")
+    print(f"Files successfully generated: {output_base}.docx and .pdf")
 
 if __name__ == "__main__":
-    NMR_IMG_DIR = "data/raw/nmr_images"
-    generate_final_si("data/output/extracted_reaction_data.csv", NMR_IMG_DIR, "data/output/Final_SI_Report.docx")
+    generate_si_files("data/output/extracted_reaction_data.csv", "data/raw/nmr_images", "data/output/Final_SI_Report")
